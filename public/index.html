@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Task Board</title>
+<style>
+  :root { --bg:#f5f6fa; --card:#fff; --text:#222; --muted:#777; --line:#e2e4ea; --accent:#5b5bd6;
+          --todo:#888; --doing:#e08a00; --done:#2e9e5b; --p1:#d64545; --p2:#e08a00; --p3:#2e9e5b; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16181d; --card:#20232a; --text:#e8e9ee; --muted:#9a9ca6; --line:#32353e; --accent:#8b8bff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, "Hiragino Sans", "Noto Sans JP", sans-serif; background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; background:var(--card); border-bottom:1px solid var(--line); }
+  header h1 { font-size:18px; margin:0; }
+  main { max-width:900px; margin:0 auto; padding:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  input, select, textarea, button { font:inherit; padding:7px 10px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--text); }
+  button { cursor:pointer; background:var(--accent); color:#fff; border:none; }
+  button.ghost { background:transparent; color:var(--text); border:1px solid var(--line); }
+  button.danger { background:var(--p1); }
+  button.small { padding:3px 8px; font-size:12px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .row > * { flex:0 0 auto; }
+  .grow { flex:1 1 160px !important; }
+  .stats { display:flex; gap:12px; flex-wrap:wrap; }
+  .stat { flex:1 1 90px; text-align:center; }
+  .stat b { display:block; font-size:24px; }
+  .stat span { color:var(--muted); font-size:12px; }
+  .bar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; margin-top:10px; }
+  .bar > div { height:100%; background:var(--done); transition:width .3s; }
+  .task { border-top:1px solid var(--line); padding:12px 0; }
+  .task:first-child { border-top:none; }
+  .task h3 { margin:0 0 4px; font-size:15px; }
+  .task.done h3 { text-decoration:line-through; color:var(--muted); }
+  .badge { display:inline-block; font-size:11px; padding:1px 7px; border-radius:10px; color:#fff; margin-right:4px; }
+  .tag { display:inline-block; font-size:11px; padding:1px 7px; border-radius:10px; background:var(--line); margin-right:4px; cursor:pointer; }
+  .meta { color:var(--muted); font-size:12px; margin-top:4px; }
+  .overdue { color:var(--p1); font-weight:600; }
+  .comments { margin-top:8px; padding-left:12px; border-left:3px solid var(--line); }
+  .comments p { margin:4px 0; font-size:13px; }
+  .hidden { display:none !important; }
+  .error { color:var(--p1); font-size:13px; min-height:18px; }
+  .toast { position:fixed; right:16px; bottom:16px; background:#222; color:#fff; padding:10px 16px; border-radius:8px; opacity:0; transition:opacity .3s; pointer-events:none; }
+  .toast.show { opacity:.95; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📋 Task Board</h1>
+  <div id="userbox" class="row hidden"><span id="username"></span><button class="ghost small" id="logout">ログアウト</button></div>
+</header>
+
+<main>
+  <!-- 認証 -->
+  <section id="auth" class="card">
+    <div class="row">
+      <input id="a-user" class="grow" placeholder="ユーザー名 (英数字3〜20)" autocomplete="username">
+      <input id="a-pass" class="grow" type="password" placeholder="パスワード (8文字以上)" autocomplete="current-password">
+      <button id="btn-login">ログイン</button>
+      <button id="btn-register" class="ghost">新規登録</button>
+    </div>
+    <div id="a-error" class="error"></div>
+    <div class="meta">デモ: <code>npm run seed</code> 後に demo / demo-pass-123</div>
+  </section>
+
+  <!-- アプリ本体 -->
+  <div id="app" class="hidden">
+    <section class="card">
+      <div class="stats" id="stats"></div>
+      <div class="bar"><div id="rate" style="width:0"></div></div>
+    </section>
+
+    <section class="card">
+      <div class="row">
+        <input id="n-title" class="grow" placeholder="新しいタスク">
+        <select id="n-priority"><option value="1">優先度:高</option><option value="2" selected>優先度:中</option><option value="3">優先度:低</option></select>
+        <input id="n-due" type="date">
+        <input id="n-tags" class="grow" placeholder="タグ (カンマ区切り)">
+        <button id="n-add">追加</button>
+      </div>
+      <div id="n-error" class="error"></div>
+    </section>
+
+    <section class="card">
+      <div class="row" style="margin-bottom:8px">
+        <input id="f-q" class="grow" placeholder="🔍 検索">
+        <select id="f-status"><option value="">すべて</option><option value="todo">未着手</option><option value="doing">進行中</option><option value="done">完了</option></select>
+        <select id="f-sort">
+          <option value="created_at:desc">新しい順</option><option value="due_date:asc">期限が近い順</option>
+          <option value="priority:asc">優先度順</option><option value="title:asc">タイトル順</option>
+        </select>
+        <button class="ghost" id="f-clear">条件クリア</button>
+      </div>
+      <div id="tagbar" style="margin-bottom:8px"></div>
+      <div id="list"></div>
+      <div class="row" style="justify-content:center;margin-top:12px">
+        <button class="ghost small" id="prev">← 前</button><span id="pageinfo" class="meta"></span><button class="ghost small" id="next">次 →</button>
+      </div>
+    </section>
+  </div>
+</main>
+<div id="toast" class="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const STATUS = { todo:['未着手','var(--todo)'], doing:['進行中','var(--doing)'], done:['完了','var(--done)'] };
+const PRIO = { 1:['高','var(--p1)'], 2:['中','var(--p2)'], 3:['低','var(--p3)'] };
+let token = localStorage.getItem('token');
+let state = { page:1, limit:10, total:0, tag:'' };
+
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function toast(msg) { const t=$('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
+
+async function api(path, opts = {}) {
+  const res = await fetch('/api' + path, {
+    method: opts.method || 'GET',
+    headers: { 'Content-Type':'application/json', ...(token ? { Authorization:'Bearer ' + token } : {}) },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (res.status === 401 && token) { logoutLocal(); throw new Error('ログインし直してください'); }
+  if (res.status === 204) return null;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data.errors && data.errors.join(' / ')) || data.error || 'エラー');
+  return data;
+}
+
+// ---- 認証 ----
+async function doAuth(kind) {
+  $('#a-error').textContent = '';
+  try {
+    const r = await api('/' + kind, { method:'POST', body:{ username:$('#a-user').value, password:$('#a-pass').value } });
+    token = r.token; localStorage.setItem('token', token);
+    $('#a-pass').value = '';
+    enterApp(r.user.username);
+  } catch (e) { $('#a-error').textContent = e.message; }
+}
+function logoutLocal() {
+  token = null; localStorage.removeItem('token');
+  $('#auth').classList.remove('hidden'); $('#app').classList.add('hidden'); $('#userbox').classList.add('hidden');
+}
+async function enterApp(name) {
+  $('#auth').classList.add('hidden'); $('#app').classList.remove('hidden'); $('#userbox').classList.remove('hidden');
+  $('#username').textContent = name;
+  await refreshAll();
+}
+$('#btn-login').onclick = () => doAuth('login');
+$('#btn-register').onclick = () => doAuth('register');
+$('#logout').onclick = async () => { try { await api('/logout', { method:'POST' }); } catch {} logoutLocal(); };
+
+// ---- 描画 ----
+async function refreshAll() { await Promise.all([loadStats(), loadTags(), loadTasks()]); }
+
+async function loadStats() {
+  const s = await api('/stats');
+  $('#stats').innerHTML = [
+    ['全体', s.total], ['未着手', s.byStatus.todo], ['進行中', s.byStatus.doing], ['完了', s.byStatus.done], ['期限切れ', s.overdue],
+  ].map(([l, n]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join('');
+  $('#rate').style.width = s.doneRate + '%';
+}
+
+async function loadTags() {
+  const tags = await api('/tags');
+  $('#tagbar').innerHTML = tags.map(t =>
+    `<span class="tag" data-tag="${esc(t.name)}" style="${state.tag===t.name?'background:var(--accent);color:#fff':''}">#${esc(t.name)} (${t.count})</span>`
+  ).join('') || '<span class="meta">タグはまだありません</span>';
+  document.querySelectorAll('#tagbar .tag').forEach(el => el.onclick = () => {
+    state.tag = state.tag === el.dataset.tag ? '' : el.dataset.tag; state.page = 1; loadTags(); loadTasks();
+  });
+}
+
+async function loadTasks() {
+  const [sort, order] = $('#f-sort').value.split(':');
+  const p = new URLSearchParams({ page:state.page, limit:state.limit, sort, order });
+  if ($('#f-q').value) p.set('q', $('#f-q').value);
+  if ($('#f-status').value) p.set('status', $('#f-status').value);
+  if (state.tag) p.set('tag', state.tag);
+  const r = await api('/tasks?' + p);
+  state.total = r.total;
+  const today = new Date().toISOString().slice(0, 10);
+  $('#list').innerHTML = r.items.map(t => {
+    const overdue = t.due_date && t.status !== 'done' && t.due_date < today;
+    return `<div class="task ${t.status}" data-id="${t.id}">
+      <h3>${esc(t.title)}</h3>
+      ${t.description ? `<div class="meta">${esc(t.description)}</div>` : ''}
+      <div class="meta">
+        <span class="badge" style="background:${STATUS[t.status][1]}">${STATUS[t.status][0]}</span>
+        <span class="badge" style="background:${PRIO[t.priority][1]}">優先度${PRIO[t.priority][0]}</span>
+        ${t.due_date ? `<span class="${overdue?'overdue':''}">期限 ${t.due_date}${overdue?' (超過)':''}</span>` : ''}
+        ${t.tags.map(g => `<span class="tag">#${esc(g)}</span>`).join('')}
+      </div>
+      <div class="row" style="margin-top:8px">
+        <select data-act="status">${Object.entries(STATUS).map(([k,v]) => `<option value="${k}" ${k===t.status?'selected':''}>${v[0]}</option>`).join('')}</select>
+        <button class="ghost small" data-act="comments">💬 ${t.comment_count}</button>
+        <button class="ghost small" data-act="edit">編集</button>
+        <button class="danger small" data-act="delete">削除</button>
+      </div>
+      <div class="comments hidden"></div>
+    </div>`;
+  }).join('') || '<div class="meta">該当するタスクはありません</div>';
+  const pages = Math.max(1, Math.ceil(r.total / state.limit));
+  $('#pageinfo').textContent = `${state.page} / ${pages} ページ (${r.total}件)`;
+  $('#prev').disabled = state.page <= 1; $('#next').disabled = state.page >= pages;
+}
+
+// ---- 操作 ----
+$('#list').addEventListener('change', async (e) => {
+  if (e.target.dataset.act !== 'status') return;
+  const id = e.target.closest('.task').dataset.id;
+  await api('/tasks/' + id, { method:'PATCH', body:{ status:e.target.value } });
+  toast('ステータスを更新しました'); refreshAll();
+});
+
+$('#list').addEventListener('click', async (e) => {
+  const act = e.target.dataset.act; if (!act || act === 'status') return;
+  const box = e.target.closest('.task'); const id = box.dataset.id;
+  try {
+    if (act === 'delete') {
+      if (!confirm('このタスクを削除しますか?')) return;
+      await api('/tasks/' + id, { method:'DELETE' }); toast('削除しました'); refreshAll();
+    } else if (act === 'edit') {
+      const title = prompt('タイトル', box.querySelector('h3').textContent); if (title === null) return;
+      await api('/tasks/' + id, { method:'PATCH', body:{ title } }); toast('更新しました'); refreshAll();
+    } else if (act === 'comments') {
+      const area = box.querySelector('.comments');
+      if (!area.classList.toggle('hidden')) await renderComments(id, area);
+    } else if (act === 'add-comment') {
+      const input = box.querySelector('.comments input');
+      if (!input.value.trim()) return;
+      await api(`/tasks/${id}/comments`, { method:'POST', body:{ body:input.value } });
+      await renderComments(id, box.querySelector('.comments')); loadTasks();
+    }
+  } catch (err) { toast(err.message); }
+});
+
+async function renderComments(id, area) {
+  const list = await api(`/tasks/${id}/comments`);
+  area.innerHTML = list.map(c => `<p>${esc(c.body)} <span class="meta">${esc(c.created_at)}</span></p>`).join('')
+    + `<div class="row"><input class="grow" placeholder="コメントを書く"><button class="small" data-act="add-comment">送信</button></div>`;
+}
+
+$('#n-add').onclick = async () => {
+  $('#n-error').textContent = '';
+  try {
+    await api('/tasks', { method:'POST', body:{
+      title: $('#n-title').value, priority: Number($('#n-priority').value),
+      due_date: $('#n-due').value || null,
+      tags: $('#n-tags').value.split(',').map(s => s.trim()).filter(Boolean),
+    }});
+    $('#n-title').value = ''; $('#n-tags').value = ''; $('#n-due').value = '';
+    toast('追加しました'); refreshAll();
+  } catch (e) { $('#n-error').textContent = e.message; }
+};
+$('#n-title').addEventListener('keydown', e => { if (e.key === 'Enter') $('#n-add').click(); });
+
+let timer;
+$('#f-q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { state.page = 1; loadTasks(); }, 250); });
+$('#f-status').onchange = $('#f-sort').onchange = () => { state.page = 1; loadTasks(); };
+$('#f-clear').onclick = () => { $('#f-q').value = ''; $('#f-status').value = ''; state.tag = ''; state.page = 1; loadTags(); loadTasks(); };
+$('#prev').onclick = () => { state.page--; loadTasks(); };
+$('#next').onclick = () => { state.page++; loadTasks(); };
+
+// ---- 起動時 ----
+(async () => {
+  if (!token) return;
+  try { const me = await api('/me'); enterApp(me.username); } catch { logoutLocal(); }
+})();
+</script>
+</body>
+</html>
